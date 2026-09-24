@@ -1,7 +1,14 @@
-// AI Studio Exporter - Background Service Worker
+// AI Studio ShareGPT Exporter - Background Service Worker
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('AI Studio Exporter installed');
+  chrome.storage.sync.remove([
+    'scrapeImages',
+    'scrapeAttachments',
+    'scrapeAttachmentPreview',
+    'scrapeAttachmentTitle',
+    'scrapeAttachmentSize'
+  ]);
+  console.log('AI Studio ShareGPT Exporter installed');
 });
 
-console.log('AI Studio Exporter background service worker loaded');
+console.log('AI Studio ShareGPT Exporter background service worker loaded');

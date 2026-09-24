@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       exportBtn.classList.remove('loading');
       exportBtn.classList.remove('stop-mode');
       exportBtn.disabled = false;
-      btnText.innerHTML = '🔄 Export Conversation';
+        btnText.innerHTML = 'Export ShareGPT';
     }
   };
 
@@ -148,7 +148,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         showMessage('error', `✗ Export failed: ${error.message}`);
       }
     }
-  });  // Initial status check
+  });
+
+  const exportInfo = document.getElementById('exportInfo');
+  const stored = await chrome.storage.sync.get(AI_STUDIO_DEFAULT_SETTINGS);
+  exportInfo.textContent = describeExportSettings(stored);
+
+  // Initial status check
   await checkAIStudioStatus();
 
   // Recheck status when popup is opened
