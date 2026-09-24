@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI Studio Exporter",
-  "version": "1.0.1",
-  "description": "Export conversations from Google AI Studio with all media attachments and chat history",
+  "name": "AI Studio ShareGPT Exporter",
+  "version": "2.0.0",
+  "description": "Export a Google AI Studio conversation directly to one ShareGPT JSONL file",
   "permissions": [
     "activeTab",
     "scripting",
@@ -43,7 +43,7 @@
       ],
       "js": [
         "settings.js",
-        "libs/jszip.min.js",
+        "sharegpt.js",
         "content.js"
       ],
       "run_at": "document_idle"

@@ -5,6 +5,21 @@ All notable changes to the AI Studio Exporter extension will be documented in th
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-09-24
+
+### Changed
+- Export is now one ShareGPT JSONL file instead of a Markdown ZIP
+- `[MIND]` / `[/MIND]` in model text are saved as `<think>` / `</think>` inside the assistant turn
+- Reasoning is kept with the reply instead of replacing it
+
+### Added
+- Save system instructions as the first `{"from":"system","value":"..."}` turn, only when this chat actually has a system prompt and the setting is on
+- Skip turns accepts any whole number: 0, 1, 2, 3, and so on. Each number drops one opening user + assistant pair. System is not counted
+
+### Removed
+- Image and attachment export
+- Markdown conversation file and ZIP packaging
+
 ## [1.0.1] - 2026-02-19
 
 ### Fixed

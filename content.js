@@ -1,33 +1,44 @@
 /***
- * Content script for AI Studio Exporter Extension
- * This script runs in the page context and extracts conversation data from Google AI Studio to be exported
+ * Content script for AI Studio ShareGPT Exporter
+ * Extracts a Google AI Studio conversation and downloads one ShareGPT JSONL line.
  *
- * @author Sukarth Acharya
- * @version 1.0.1
+ * System is the first turn only when this chat actually has system instructions
+ * and the setting is on. Otherwise the file starts at the first message.
+ * Skip turns drops N opening user+assistant pairs (0, 1, 2, 3, ...).
+ *
+ * @version 2.0.0
  * @license MIT
- * @repository https://github.com/sukarth/ai-studio-exporter
  */
 
 (function () {
   'use strict';
 
-  // Configuration
   const CONFIG = {
-    ELEMENT_LOAD_DELAY: 700, // Delay in ms for elements to load
+    ELEMENT_LOAD_DELAY: 700
   };
 
-  // Global state
   let isExporting = false;
   let shouldCancel = false;
   const ALLOWED_ACTIONS = new Set(['export', 'getStatus', 'cancel']);
-  console.log('AI Studio Exporter content script loaded');
+  console.log('AI Studio ShareGPT Exporter content script loaded');
 
-  // Utility function to sleep/wait
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // Create and show loading overlay that blocks user input
+  const sleep = async (ms) => {
+    let remaining = ms;
+
+    while (remaining > 0) {
+      if (shouldCancel) {
+        throw new Error('Export cancelled by user');
+      }
+
+      const chunk = Math.min(100, remaining);
+      await wait(chunk);
+      remaining -= chunk;
+    }
+  };
+
   function showLoadingOverlay() {
-    // Create overlay container
     const overlay = document.createElement('div');
     overlay.id = 'ai-studio-export-overlay';
     overlay.style.cssText = `
@@ -46,7 +57,6 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     `;
 
-    // Create loading content
     const content = document.createElement('div');
     content.style.cssText = `
       background: #25262b;
@@ -54,13 +64,12 @@
       border-radius: 16px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
       text-align: center;
-      max-width: 400px;
+      max-width: 440px;
       width: 90%;
       border: 1px solid #2c2e33;
       color: #e9ecef;
     `;
 
-    // Loading spinner
     const spinner = document.createElement('div');
     spinner.style.cssText = `
       width: 50px;
@@ -72,7 +81,6 @@
       margin: 0 auto 24px;
     `;
 
-    // Add spinner animation to head
     if (!document.querySelector('#ai-studio-export-spinner-style')) {
       const style = document.createElement('style');
       style.id = 'ai-studio-export-spinner-style';
@@ -85,9 +93,9 @@
       document.head.appendChild(style);
     }
 
-    // Title
     const title = document.createElement('h2');
-    title.textContent = 'Exporting Conversation...';
+    title.id = 'ai-studio-export-title';
+    title.textContent = 'Exporting ShareGPT JSONL...';
     title.style.cssText = `
       margin: 0 0 12px 0;
       color: #fff;
@@ -95,7 +103,6 @@
       font-weight: 600;
     `;
 
-    // Status message
     const message = document.createElement('p');
     message.id = 'ai-studio-export-status';
     message.textContent = 'Initializing export process...';
@@ -104,9 +111,9 @@
       color: #a5a5a5;
       font-size: 14px;
       line-height: 1.6;
+      word-break: break-word;
     `;
 
-    // Progress indicator
     const progressContainer = document.createElement('div');
     progressContainer.style.cssText = `
       margin-top: 24px;
@@ -124,7 +131,6 @@
       margin-bottom: 20px;
     `;
 
-    // Cancel button
     const cancelBtn = document.createElement('button');
     cancelBtn.textContent = 'Cancel Export';
     cancelBtn.style.cssText = `
@@ -154,31 +160,24 @@
 
     progressContainer.appendChild(progressText);
     progressContainer.appendChild(cancelBtn);
-
-    // Assemble content
     content.appendChild(spinner);
     content.appendChild(title);
     content.appendChild(message);
     content.appendChild(progressContainer);
-
-    // Assemble overlay
     overlay.appendChild(content);
 
-    // Block all user interactions
-    overlay.addEventListener('mousedown', (e) => e.stopPropagation());
-    overlay.addEventListener('mouseup', (e) => e.stopPropagation());
-    overlay.addEventListener('click', (e) => e.stopPropagation());
-    overlay.addEventListener('scroll', (e) => e.preventDefault());
-    overlay.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
-    overlay.addEventListener('keydown', (e) => e.preventDefault());
-    overlay.addEventListener('keyup', (e) => e.preventDefault());
+    overlay.addEventListener('mousedown', (event) => event.stopPropagation());
+    overlay.addEventListener('mouseup', (event) => event.stopPropagation());
+    overlay.addEventListener('click', (event) => event.stopPropagation());
+    overlay.addEventListener('scroll', (event) => event.preventDefault());
+    overlay.addEventListener('wheel', (event) => event.preventDefault(), { passive: false });
+    overlay.addEventListener('keydown', (event) => event.preventDefault());
+    overlay.addEventListener('keyup', (event) => event.preventDefault());
 
     document.body.appendChild(overlay);
-
     return overlay;
   }
 
-  // Update loading overlay status
   function updateLoadingStatus(message, progress) {
     const statusEl = document.getElementById('ai-studio-export-status');
     const progressEl = document.getElementById('ai-studio-export-progress');
@@ -192,7 +191,20 @@
     }
   }
 
-  // Hide and remove loading overlay
+  function showExportFailure(message) {
+    const title = document.getElementById('ai-studio-export-title');
+    if (title) {
+      title.textContent = 'Export failed';
+    }
+
+    updateLoadingStatus(message, 'Nothing was saved');
+
+    const button = document.querySelector('#ai-studio-export-overlay button');
+    if (button) {
+      button.style.display = 'none';
+    }
+  }
+
   function hideLoadingOverlay() {
     const overlay = document.getElementById('ai-studio-export-overlay');
     if (overlay) {
@@ -202,157 +214,169 @@
     }
   }
 
-  // Extract user message text from ms-text-chunk element
-  function extractUserMessageText(chatTurn) {
-    const textChunk = chatTurn.querySelector('ms-text-chunk');
-    if (textChunk) {
-      return textChunk.innerText.trim();
+  function queryAllDeep(selector, root = document, out = []) {
+    if (root.querySelectorAll) {
+      out.push(...root.querySelectorAll(selector));
     }
+
+    const elements = root.querySelectorAll ? root.querySelectorAll('*') : [];
+    for (const element of elements) {
+      if (element.shadowRoot) {
+        queryAllDeep(selector, element.shadowRoot, out);
+      }
+    }
+
+    return out;
+  }
+
+  function fieldLabel(element) {
+    return [
+      element.getAttribute('aria-label'),
+      element.getAttribute('placeholder'),
+      element.getAttribute('name'),
+      element.getAttribute('id')
+    ].filter(Boolean).join(' ');
+  }
+
+  function isSystemInstructionField(element) {
+    return /system instructions?/i.test(fieldLabel(element));
+  }
+
+  function readFieldValue(element) {
+    if (!element) {
+      return '';
+    }
+
+    if (typeof element.value === 'string') {
+      return element.value.trim();
+    }
+
+    if (element.isContentEditable) {
+      return (element.innerText || '').trim();
+    }
+
     return '';
   }
 
-  // Extract model message text from ms-text-chunk element
-  function extractModelMessageText(chatTurn) {
-    const textChunk = chatTurn.querySelector('ms-text-chunk');
-    if (textChunk) {
-      return textChunk.innerText.trim();
-    }
-    return '';
-  }
-
-  // Convert blob URL to base64
-  async function blobUrlToBase64(blobUrl) {
-    try {
-      const response = await fetch(blobUrl);
-      const blob = await response.blob();
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    } catch (error) {
-      console.error('Error converting blob to base64:', error);
-      return null;
-    }
-  }
-
-  // Extract image from user message
-  async function extractUserImage(chatTurn) {
-    const imgElement = chatTurn.querySelector('img.loaded-image');
-    if (!imgElement) {
-      return null;
+  function findSystemField() {
+    const fields = queryAllDeep('textarea, input, [contenteditable="true"]');
+    const labeled = fields.find(isSystemInstructionField);
+    if (labeled) {
+      return labeled;
     }
 
-    const src = imgElement.getAttribute('src');
-    const alt = imgElement.getAttribute('alt') || 'image.jpg';
-
-    if (src && src.startsWith('blob:')) {
-      const base64Data = await blobUrlToBase64(src);
-      return {
-        alt: alt,
-        base64: base64Data,
-        filename: alt
-      };
+    const hosts = queryAllDeep('ms-system-instructions, ms-system-instruction, [class*="system-instruction"]');
+    for (const host of hosts) {
+      const nested = host.querySelector?.('textarea, input, [contenteditable="true"]');
+      if (nested) {
+        return nested;
+      }
     }
 
     return null;
   }
 
-  // Extract attachment from user message
-  async function extractUserAttachment(chatTurn, settings) {
-    const fileChunk = chatTurn.querySelector('ms-file-chunk');
-    if (!fileChunk) {
+  function findSystemInstructionButton() {
+    return queryAllDeep('button').find((button) => {
+      const label = `${button.getAttribute('aria-label') || ''} ${button.innerText || ''}`;
+      return /system instructions?/i.test(label);
+    }) || null;
+  }
+
+  // null means the field is not in the DOM yet. An empty string means this
+  // chat has no system instructions.
+  function readSystemInstructionValue() {
+    const field = findSystemField();
+    if (!field) {
       return null;
     }
 
-    // Get file name/text
-    let fileName = 'attachment';
-    if (settings.scrapeAttachmentTitle) {
-      const nameSpan = fileChunk.querySelector('span');
-      fileName = nameSpan ? nameSpan.innerText.trim() : 'attachment';
-    }
-
-    // Get file size/tokens info
-    let fileInfo = '';
-    if (settings.scrapeAttachmentSize) {
-      const fileChunkContainer = fileChunk.querySelector('.file-chunk-container');
-      if (fileChunkContainer) {
-        const lastChild = fileChunkContainer.lastChild;
-        if (lastChild) {
-          fileInfo = lastChild.innerText || '';
-        }
-      }
-    }
-
-    // Try to get preview image
-    let previewBase64 = null;
-    if (settings.scrapeAttachmentPreview) {
-      const previewImg = fileChunk.querySelector('img');
-      if (previewImg) {
-        const imgSrc = previewImg.getAttribute('src');
-        if (imgSrc) {
-          if (imgSrc.startsWith('blob:')) {
-            // Handle blob URLs
-            previewBase64 = await blobUrlToBase64(imgSrc);
-          } else if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
-            // Handle HTTP/HTTPS URLs (e.g., Google Drive links)
-            try {
-              const response = await fetch(imgSrc);
-              const blob = await response.blob();
-              previewBase64 = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-              });
-            } catch (error) {
-              console.error('Error downloading preview image:', error);
-            }
-          }
-        }
-      }
-    }
-
-    return {
-      fileName: fileName,
-      fileInfo: fileInfo,
-      previewBase64: previewBase64
-    };
+    return readFieldValue(field);
   }
 
-  // Extract reasoning text from model message
+  async function extractSystemInstructions() {
+    const already = readSystemInstructionValue();
+
+    // Field is already in the page. Empty means this chat has no system prompt.
+    if (already !== null) {
+      return already;
+    }
+
+    const button = findSystemInstructionButton();
+
+    if (!button) {
+      return '';
+    }
+
+    button.click();
+
+    try {
+      await sleep(CONFIG.ELEMENT_LOAD_DELAY);
+      const opened = readSystemInstructionValue();
+      return opened || '';
+    } finally {
+      const closeButton = findSystemInstructionButton() || button;
+      closeButton.click();
+      await wait(Math.min(CONFIG.ELEMENT_LOAD_DELAY, 300));
+    }
+  }
+
+  function chunkText(element) {
+    const visible = (element.innerText || '').trim();
+    if (visible) {
+      return visible;
+    }
+
+    return (element.textContent || '').replace(/^\s+/, '').replace(/\s+$/, '');
+  }
+
+  function extractTurnText(chatTurn) {
+    const chunks = Array.from(chatTurn.querySelectorAll('ms-text-chunk'))
+      .filter((element) => !element.closest('.mat-expansion-panel-body'));
+
+    return chunks
+      .map(chunkText)
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  function hasMindMarker(text) {
+    return text.includes('[MIND]')
+      || text.includes('[/MIND]')
+      || text.includes('<think>')
+      || text.includes('</think>');
+  }
+
   async function extractReasoningText(chatTurn) {
-    // Find the chevron button
     const chevronButton = Array.from(chatTurn.querySelectorAll('span')).find(
-      span => span.textContent.trim() === 'chevron_right'
+      (span) => span.textContent.trim() === 'chevron_right'
     );
 
     if (!chevronButton) {
       return null;
     }
 
-    // Click to expand
-    chevronButton.click();
-    await sleep(CONFIG.ELEMENT_LOAD_DELAY); // Wait for expansion animation
+    let opened = false;
 
-    // Find the reasoning text
-    const expansionPanel = chatTurn.querySelector('.mat-expansion-panel-body ms-text-chunk');
-    let reasoningText = null;
+    try {
+      chevronButton.click();
+      opened = true;
+      await sleep(CONFIG.ELEMENT_LOAD_DELAY);
 
-    if (expansionPanel) {
-      // Get text content and preserve formatting, but remove outer whitespace
-      reasoningText = expansionPanel.textContent.replace(/^\s+/, '').replace(/\s+$/, '');
+      const expansionPanel = chatTurn.querySelector('.mat-expansion-panel-body ms-text-chunk');
+      if (!expansionPanel) {
+        return null;
+      }
+
+      return expansionPanel.textContent.replace(/^\s+/, '').replace(/\s+$/, '');
+    } finally {
+      if (opened) {
+        chevronButton.click();
+        await wait(CONFIG.ELEMENT_LOAD_DELAY);
+      }
     }
-
-    // Click again to collapse
-    chevronButton.click();
-    await sleep(CONFIG.ELEMENT_LOAD_DELAY);
-
-    return reasoningText;
   }
 
-  // Get settings from storage
   function getSettings() {
     return new Promise((resolve) => {
       chrome.storage.sync.get(
@@ -362,89 +386,56 @@
     });
   }
 
-  // Process a single chat turn
-  async function processChatTurn(chatTurn, imageCounter, settings) {
-    // Scroll the chat turn into view before processing
+  async function processChatTurn(chatTurn, settings, position) {
     chatTurn.scrollIntoView();
-    await sleep(CONFIG.ELEMENT_LOAD_DELAY); // Wait for scroll to complete
+    await sleep(CONFIG.ELEMENT_LOAD_DELAY);
 
     const turnContainer = chatTurn.querySelector('[data-turn-role]');
     if (!turnContainer) {
       return null;
     }
 
-    const role = turnContainer.getAttribute('data-turn-role');
+    const role = turnContainer.getAttribute('data-turn-role') || '';
+    const normalized = role.toLowerCase();
 
-    if (role === 'User') {
-      // Check for image first (if enabled)
-      if (settings.scrapeImages) {
-        const imageData = await extractUserImage(chatTurn);
-
-        if (imageData) {
-          return {
-            type: 'user',
-            contentType: 'image',
-            image: imageData
-          };
-        }
-      }
-
-      // Check for attachment (if enabled)
-      if (settings.scrapeAttachments) {
-        const attachmentData = await extractUserAttachment(chatTurn, settings);
-
-        if (attachmentData) {
-          return {
-            type: 'user',
-            contentType: 'attachment',
-            attachment: attachmentData
-          };
-        }
-      }
-
-      // Extract text
-      const text = extractUserMessageText(chatTurn);
-      if (text) {
-        return {
-          type: 'user',
-          contentType: 'text',
-          text: text
-        };
-      }
-
-      // If no text or attachment found, return null
+    if (normalized !== 'user' && normalized !== 'model') {
       return null;
-    } else if (role === 'Model') {
-      // Check for reasoning block (if enabled)
-      if (settings.scrapeReasoning) {
-        const reasoningText = await extractReasoningText(chatTurn);
+    }
 
-        if (reasoningText) {
-          return {
-            type: 'model',
-            contentType: 'reasoning',
-            text: reasoningText
-          };
-        }
-      }
+    let text = extractTurnText(chatTurn);
 
-      // Extract model response
-      const text = extractModelMessageText(chatTurn);
-      if (text) {
-        return {
-          type: 'model',
-          contentType: 'response',
-          text: text
-        };
+    if (normalized === 'model' && settings.scrapeReasoning) {
+      const reasoningText = await extractReasoningText(chatTurn);
+
+      if (reasoningText && !hasMindMarker(text)) {
+        text = text
+          ? `[MIND]\n${reasoningText}\n[/MIND]\n${text}`
+          : `[MIND]\n${reasoningText}\n[/MIND]`;
       }
     }
 
-    return null;
+    if (!text.trim()) {
+      const media = chatTurn.querySelector('img, ms-file-chunk, video, audio');
+      if (media) {
+        throw new AIStudioShareGPT.AlignmentError(
+          `turn #${position} (${role}) is media-only. Image and file export was removed, and dropping this turn would break human/gpt alternation.`
+        );
+      }
+
+      throw new AIStudioShareGPT.AlignmentError(
+        `turn #${position} (${role}) has no usable text - dropping it would break human/gpt alternation`
+      );
+    }
+
+    return {
+      role: normalized,
+      text,
+      position
+    };
   }
 
-  // Check if raw mode is already enabled
   function isRawModeEnabled() {
-    return document.body.innerHTML.includes("Show conversation with markdown formatting");
+    return document.body.innerHTML.includes('Show conversation with markdown formatting');
   }
 
   function getMoreActionsButton() {
@@ -488,65 +479,116 @@
     }
 
     moreActionsButton.click();
-    await sleep(CONFIG.ELEMENT_LOAD_DELAY / 5);
+    await wait(CONFIG.ELEMENT_LOAD_DELAY / 5);
   }
 
-  // Main export function
+  async function revertRawMode() {
+    try {
+      const { rawOutputButton } = await ensureMoreActionsMenuOpen();
+      rawOutputButton.click();
+      await wait(CONFIG.ELEMENT_LOAD_DELAY);
+
+      if (isRawModeEnabled()) {
+        console.warn('Warning: Failed to disable raw output mode');
+      }
+    } catch (revertError) {
+      console.warn('Warning: Failed to revert raw output mode', revertError);
+    } finally {
+      await closeMoreActionsMenuIfOpen();
+    }
+  }
+
+  function safeFilename(title) {
+    const cleaned = String(title || '')
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[. ]+$/g, '')
+      .slice(0, 80);
+
+    return cleaned || 'conversation';
+  }
+
+  function downloadTextFile(filename, text) {
+    const blob = new Blob([text], { type: 'application/jsonl;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   async function exportConversation() {
     if (isExporting) {
       return { success: false, message: 'Export already in progress' };
     }
 
+    if (!globalThis.AIStudioShareGPT) {
+      return { success: false, message: 'ShareGPT exporter failed to load' };
+    }
+
+    let rawModeToggledOn = false;
+
     try {
       isExporting = true;
       shouldCancel = false;
 
-      // Load settings
       const settings = await getSettings();
-
-      // Update config with loaded delay
       CONFIG.ELEMENT_LOAD_DELAY = settings.loadDelay;
 
-      // Show loading overlay
-      const overlay = showLoadingOverlay();
-      updateLoadingStatus('Enabling raw output mode...', 'Step 1/4: Setup');
+      showLoadingOverlay();
 
-      // Step 1: Check initial raw mode state and toggle if needed
-      console.log('Checking raw output mode state...');
+      let systemText = '';
+      if (settings.includeSystem) {
+        updateLoadingStatus('Checking this chat for system instructions...', 'Step 1/5: System');
+        systemText = await extractSystemInstructions();
+
+        if (systemText) {
+          console.log(`System instructions found (${systemText.length} chars)`);
+        } else {
+          console.log('No system instructions in this chat; file will start at the first message');
+        }
+      } else {
+        console.log('System prompt saving is off');
+      }
+
+      if (shouldCancel) {
+        throw new Error('Export cancelled by user');
+      }
+
+      updateLoadingStatus(
+        'Enabling raw output mode...',
+        settings.includeSystem ? 'Step 2/5: Setup' : 'Step 1/4: Setup'
+      );
+
       let initialRawModeEnabled = false;
       try {
         const { rawOutputButton } = await ensureMoreActionsMenuOpen();
-
-        // Store the initial state (true = already on, false = currently off)
         initialRawModeEnabled = isRawModeEnabled();
         console.log(`Initial raw mode state: ${initialRawModeEnabled ? 'ON' : 'OFF'}`);
 
-        // Toggle raw mode only if it's not already enabled
         if (!initialRawModeEnabled) {
           console.log('Toggling raw output mode ON...');
           rawOutputButton.click();
-          await sleep(CONFIG.ELEMENT_LOAD_DELAY * 5); // Wait for raw output to load (longer delay needed)
+          rawModeToggledOn = true;
+          await sleep(CONFIG.ELEMENT_LOAD_DELAY * 5);
 
-          // Verify that raw mode was enabled successfully
-          const rawModeAfterToggle = isRawModeEnabled();
-          console.log(`Raw mode after toggle: ${rawModeAfterToggle ? 'ON' : 'OFF'}`);
-          if (!rawModeAfterToggle) {
+          if (!isRawModeEnabled()) {
             throw new Error('Failed to enable raw output mode');
           }
-        } else {
-          console.log('Raw output mode already ON, skipping toggle');
         }
       } finally {
-        // Always close the actions menu before continuing export steps.
         await closeMoreActionsMenuIfOpen();
       }
 
+      if (shouldCancel) {
+        throw new Error('Export cancelled by user');
+      }
 
-      if (shouldCancel) throw new Error('Export cancelled by user');
-
-      // Step 2: Find all chat turns
-      updateLoadingStatus('Scanning conversation...', 'Step 2/4: Scanning');
-      console.log('Finding chat turns...');
+      updateLoadingStatus('Scanning conversation...', 'Scanning');
       const chatTurns = document.querySelectorAll('ms-chat-turn');
       console.log(`Found ${chatTurns.length} chat turns`);
 
@@ -554,193 +596,90 @@
         throw new Error('No chat turns found');
       }
 
-      if (shouldCancel) throw new Error('Export cancelled by user');
+      const turns = [];
 
-      // Step 3: Process all chat turns
-      updateLoadingStatus('Extracting messages and images...', `Step 3/4: Processing (0/${chatTurns.length})`);
-      const conversationData = [];
-      const images = [];
-      let imageCounter = 0;
-
-      for (let i = 0; i < chatTurns.length; i++) {
-        if (shouldCancel) throw new Error('Export cancelled by user');
+      for (let i = 0; i < chatTurns.length; i += 1) {
+        if (shouldCancel) {
+          throw new Error('Export cancelled by user');
+        }
 
         updateLoadingStatus(
-          'Extracting messages and images...',
-          `Step 3/4: Processing (${i + 1}/${chatTurns.length})`
+          'Extracting messages...',
+          `Processing ${i + 1}/${chatTurns.length}`
         );
-        console.log(`Processing turn ${i + 1}/${chatTurns.length}`);
-        const turnData = await processChatTurn(chatTurns[i], imageCounter, settings);
 
-        if (turnData) {
-          if (turnData.contentType === 'image') {
-            imageCounter++;
-            const imageName = `image-${imageCounter}.jpg`;
-            images.push({
-              name: imageName,
-              base64: turnData.image.base64
-            });
-            conversationData.push({
-              type: 'user',
-              contentType: 'image',
-              imageName: imageName
-            });
-          } else if (turnData.contentType === 'attachment') {
-            // Handle attachment
-            const attachment = turnData.attachment;
-            if (attachment.previewBase64) {
-              imageCounter++;
-              const previewName = `image-${imageCounter}.jpg`;
-              images.push({
-                name: previewName,
-                base64: attachment.previewBase64
-              });
-              conversationData.push({
-                type: 'user',
-                contentType: 'attachment',
-                fileName: attachment.fileName,
-                fileInfo: attachment.fileInfo,
-                previewName: previewName
-              });
-            } else {
-              conversationData.push({
-                type: 'user',
-                contentType: 'attachment',
-                fileName: attachment.fileName,
-                fileInfo: attachment.fileInfo,
-                previewName: null
-              });
-            }
-          } else {
-            conversationData.push(turnData);
-          }
+        const turn = await processChatTurn(chatTurns[i], settings, i + 1);
+        if (turn) {
+          turns.push(turn);
         }
       }
 
-      if (shouldCancel) throw new Error('Export cancelled by user');
+      if (shouldCancel) {
+        throw new Error('Export cancelled by user');
+      }
 
-      // Step 4: Generate Markdown and create ZIP
-      updateLoadingStatus('Creating ZIP file...', 'Step 4/4: Packaging');
-      console.log('Generating markdown...');
+      updateLoadingStatus('Writing ShareGPT JSONL...', 'Packaging');
 
-      // Get conversation title and token size
+      const built = AIStudioShareGPT.buildShareGPT(turns, {
+        skipTurns: settings.skipTurns,
+        includeReasoning: settings.scrapeReasoning,
+        includeSystem: settings.includeSystem,
+        system: systemText,
+        allowMerge: true
+      });
+
+      built.warnings.forEach((warning) => {
+        console.warn(`[WARN] ${warning}`);
+      });
+
       const titleElement = document.querySelector('.actions.pointer.mode-title');
-      const tokenElement = document.querySelector('.token-container');
       const conversationTitle = titleElement ? titleElement.innerText.trim() : 'Untitled Conversation';
-      const tokenSize = tokenElement ? tokenElement.innerText.trim() : 'Unknown';
+      const filename = `${safeFilename(conversationTitle)}.jsonl`;
 
-      let markdown = `# **Title:** ${conversationTitle}\n\n`;
-      markdown += `**Token Size:** ${tokenSize}\n\n`;
-      markdown += `Exported on: ${new Date().toLocaleString()}\n\n`;
-      markdown += '---\n\n';
+      downloadTextFile(filename, built.jsonl);
 
-      for (const item of conversationData) {
-        if (item.type === 'user') {
-          if (item.contentType === 'image') {
-            markdown += `## 👤 User\n\n`;
-            markdown += `**Image Attachment:**\n\n File Name: ${item.imageName}\n\n Image: ![${item.imageName}](${item.imageName})\n\n`;
-          } else if (item.contentType === 'attachment') {
-            markdown += `## 👤 User\n\n`;
-            markdown += `**File Attachment:** ${item.fileName}\n\n`;
-            if (item.fileInfo) {
-              markdown += `File Size: _${item.fileInfo}_\n\n`;
-            }
-            if (item.previewName) {
-              markdown += `File Name: ![${item.fileName}](${item.previewName})\n\n`;
-            }
-          } else {
-            markdown += `## 👤 User\n\n`;
-            markdown += `${item.text}\n\n`;
-          }
-        } else if (item.type === 'model') {
-          if (item.contentType === 'reasoning') {
-            markdown += `## 🤖 Model (Reasoning)\n\n`;
-            markdown += `${item.text}\n\n`;
-          } else {
-            markdown += `## 🤖 Model\n\n`;
-            markdown += `${item.text}\n\n`;
-          }
-        }
+      const savedSystem = built.record.conversations[0]?.from === 'system';
+      const summary = savedSystem
+        ? `Saved ${built.record.conversations.length} messages, including system`
+        : `Saved ${built.record.conversations.length} messages`;
+
+      if (built.warnings.length) {
+        updateLoadingStatus(built.warnings[0], `${summary}, with ${built.warnings.length} warning(s)`);
+        await wait(2200);
+      } else {
+        updateLoadingStatus(`Downloaded ${filename}`, summary);
+        await wait(700);
       }
 
-      // Step 5: Create ZIP file
-      console.log('Creating ZIP file...');
-      const zip = new JSZip();
-
-      // Add markdown file
-      zip.file('conversation.md', markdown);
-
-      // Add images
-      for (const image of images) {
-        if (image.base64) {
-          // Remove data URL prefix (e.g., "data:image/png;base64,")
-          const base64Data = image.base64.split(',')[1];
-          zip.file(image.name, base64Data, { base64: true });
-        }
-      }
-
-      // Generate ZIP
-      const zipBlob = await zip.generateAsync({ type: 'blob' });
-
-      if (shouldCancel) throw new Error('Export cancelled by user');
-
-      // Step 6: Download ZIP
-      updateLoadingStatus('Download starting...', 'Finalizing...');
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      const filename = `ai-studio-export-${timestamp}.zip`;
-
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      console.log('Export completed successfully!');
-
-      // Step 5: Revert raw mode to original state if it was toggled
-      if (!initialRawModeEnabled) {
-        console.log('Reverting raw output mode to original state...');
-        try {
-          const { rawOutputButton: rawOutputButtonRevert } = await ensureMoreActionsMenuOpen();
-          rawOutputButtonRevert.click();
-          await sleep(CONFIG.ELEMENT_LOAD_DELAY);
-
-          // Verify that raw mode was disabled successfully
-          const rawModeAfterRevert = isRawModeEnabled();
-          console.log(`Raw mode after revert: ${rawModeAfterRevert ? 'ON' : 'OFF'}`);
-          if (rawModeAfterRevert) {
-            console.warn('Warning: Failed to disable raw output mode');
-          }
-        } catch (revertError) {
-          console.warn('Warning: Failed to revert raw output mode', revertError);
-        } finally {
-          await closeMoreActionsMenuIfOpen();
-        }
-      }
+      console.log('Export completed successfully', filename);
 
       return {
         success: true,
-        message: `Exported ${conversationData.length} messages with ${images.length} images`,
-        filename: filename
+        message: `${summary} to ${filename}`,
+        filename
       };
-
     } catch (error) {
       console.error('Export failed:', error);
+      showExportFailure(error.message || 'Export failed');
+      await wait(/cancelled by user/i.test(error.message || '') ? 800 : 3200);
+
       return {
         success: false,
         message: error.message
       };
     } finally {
-      isExporting = false;
       shouldCancel = false;
+
+      if (rawModeToggledOn) {
+        console.log('Reverting raw output mode to original state...');
+        await revertRawMode();
+      }
+
+      isExporting = false;
       hideLoadingOverlay();
     }
   }
 
-  // Listen for messages from popup
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const senderUrl = sender?.url;
     const isInternalMessage = sender?.id === chrome.runtime.id &&
@@ -763,7 +702,7 @@
 
     if (request.action === 'export') {
       exportConversation().then(sendResponse);
-      return true; // Will respond asynchronously
+      return true;
     }
 
     if (request.action === 'getStatus') {
@@ -775,5 +714,4 @@
     sendResponse({ success: true });
     return false;
   });
-
 })();

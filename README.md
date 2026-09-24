@@ -1,113 +1,101 @@
-# 📦 AI Studio Exporter
+# AI Studio ShareGPT Exporter
 
-A browser extension that exports conversations from Google AI Studio, including all media attachments and chat history in a convenient ZIP file.
+A fork of [Sukarth/AI-studio-exporter](https://github.com/Sukarth/AI-studio-exporter) that saves a Google AI Studio conversation directly as ShareGPT JSONL. No markdown file, no ZIP, and no image export.
 
-![Demo of AI Studio Exporter](https://raw.githubusercontent.com/Sukarth/AI-studio-exporter/main/images/Demo.gif)
+## Features
 
-## ✨ Features
+- One click downloads a `.jsonl` file. One conversation is one JSON line.
+- ShareGPT roles: `system`, `human`, and `gpt`.
+- System instructions are checked on the actual chat. They are saved as the first turn only when the chat has them and the setting is on. If the chat has none, the file starts at the first message.
+- Skip turns is any whole number: `0`, `1`, `2`, `3`, and so on. `0` keeps every pair. `1` drops the first user + assistant pair. The system turn is never counted.
+- `[MIND]` / `[/MIND]` in model text are saved as `<think>` / `</think>`.
+- Runs entirely in the browser. Nothing is uploaded.
 
-- 🔄 **Complete Export**: Exports entire conversation history from Google AI Studio.
-- 🖼️ **Media Preservation**: Includes all image attachments in the export.
-- 📝 **Markdown Format**: Conversations are saved in readable Markdown format.
-- 🤖 **Reasoning Support**: Captures model reasoning blocks when available.
-- 📦 **ZIP Archive**: Everything packaged in a single ZIP file.
-- 🎨 **User-Friendly**: Simple, intuitive popup interface.
-- ⚡ **Fast & Efficient**: Optimized for performance and works entirely client-side.
-- 🔒 **Privacy-Focused**: NO data is collected or sent to any external servers.
+## Installation
 
-### 🔐 Security & Privacy
-- Extension pages now ship with an explicit CSP (`script-src 'self'; object-src 'none'`) for defense in depth.
-- Popup and background logic only interact with `https://aistudio.google.com/prompts/` tabs.
-- Messages between scripts are validated and rejected when untrusted or malformed.
-- User settings are sanitized before use to avoid unexpected values.
-
-## 🚀 Installation (from Source)
-
-Follow these steps to install and run the extension locally. Installation from Chrome Web Store is coming soon...
-
-### Step 1: Get the Code
-
-Clone the repository to your local machine:
-```bash
-git clone https://github.com/sukarth/ai-studio-exporter.git
-cd ai-studio-exporter
-```
-
-### Step 2: Load the Extension in Chrome
-
-1.  **Open Chrome Extensions Page**: Navigate to `chrome://extensions/`.
-2.  **Enable Developer Mode**: Toggle the "Developer mode" switch in the top-right corner.
-3.  **Load the Extension**:
-    *   Click the "Load unpacked" button.
-    *   Select the `ai-studio-exporter` folder that you cloned.
-4.  **Verify**: The "AI Studio Exporter" should now appear in your list of extensions. Pin it to your toolbar for easy access.
-
-## 🔄 Updating
-
-When a new version is released:
-
-1. Download the latest version (git clone)
-2. Go to `chrome://extensions/`
-3. Find "AI Studio Exporter"
-4. Click "Remove"
-5. Add the extension again by clicking "Load unpacked" and selecting the new/same `ai-studio-exporter` folder
-
-Alternatively, if using Git:
+1. Clone this fork:
 
 ```bash
-git pull origin main
-# Reload the extension in chrome://extensions/
+git clone https://github.com/Hastagaras/AI-studio-exporter.git
+cd AI-studio-exporter
 ```
 
-## 📖 Usage
+2. Open `chrome://extensions/`.
+3. Turn on **Developer mode**.
+4. Click **Load unpacked** and select this folder.
+5. Pin **AI Studio ShareGPT Exporter**.
 
-1.  **Navigate to Google AI Studio**: Go to a conversation you want to export (e.g., `https://aistudio.google.com/prompts/...`).
-2.  **Click the Extension Icon**: The popup will show a "Connected to AI Studio" status.
-3.  **Export**: Click the "Export Conversation" button. The ZIP file containing your conversation and images will be downloaded automatically after the export completes.
+After pulling updates, click **Reload** on the extension card.
 
-## 📂 Export Structure
+## Usage
 
-Your downloaded ZIP file will have the following structure:
+1. Open a conversation at `https://aistudio.google.com/prompts/...`.
+2. Open the extension. The popup shows the current skip count and whether system saving is on.
+3. Click **Export ShareGPT**.
+4. A file named after the conversation, for example `My chat.jsonl`, downloads when the export finishes.
 
+Change **Skip turns** and **Save system instructions** from the gear icon. There is no upper limit on the skip number.
+
+## Output
+
+Each download is one JSONL line. `JSON.stringify` matches Python `json.dumps(..., ensure_ascii=False, separators=(",", ":"))`.
+
+Chat with system instructions, and system saving on:
+
+```json
+{"conversations":[{"from":"system","value":"You are a tutor."},{"from":"human","value":"Hello"},{"from":"gpt","value":"<think>\nplan\n</think>\nHi."}]}
 ```
-ai-studio-export-YYYY-MM-DDTHH-mm-ss.zip
-├── conversation.md          # Full conversation in Markdown
-├── image1.jpg               # User-uploaded image 1 (if any)
-├── image2.png               # User-uploaded image 2 (if any)
-└── ...                      # Additional media files (if any, such as attached document previews)
+
+Same chat with system saving off, or a chat that has no system instructions:
+
+```json
+{"conversations":[{"from":"human","value":"Hello"},{"from":"gpt","value":"<think>\nplan\n</think>\nHi."}]}
 ```
 
-## 🤝 Contributing
+Skip turns removes that many opening user + assistant pairs before the system turn is inserted. Skip `1` on the chat above keeps the system turn, if it was saved, and drops `Hello` / `Hi.`.
 
-Contributions are welcome! We appreciate any help, from reporting bugs to submitting pull requests. Please read our [CONTRIBUTING.md](CONTRIBUTING.md) file for guidelines on how to get started.
+Several downloads can be concatenated into one training file:
 
+```bash
+cat *.jsonl > sharegpt.jsonl
+```
 
-## 🛠️ Technical Details
+Images and file attachments are not exported. A media-only turn fails the export instead of being dropped, because dropping it would break human/gpt alternation.
 
-- **Manifest V3**: Built using the latest Chrome extension architecture.
-- **JSZip**: Used for client-side ZIP file generation.
-- **Content Scripts**: For DOM manipulation and data extraction from the AI Studio page.
-- **Service Worker**: For background task coordination.
-- **Vanilla JS**: No heavy frameworks, keeping the extension lightweight.
+## Settings
 
-### Permissions
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Save system instructions | On | Write `{"from":"system","value":"..."}` only if this chat has a system prompt. Off never writes one. |
+| Skip turns | 0 | `0` keeps every pair. `1`, `2`, `3`, … drop that many opening pairs. |
+| Include reasoning | On | Keep thinking and convert `[MIND]` tags to `<think>` tags. |
+| Element load delay | 700 ms | Raise this if messages are missing. |
 
-- `activeTab`: To access the current AI Studio tab.
-- `scripting`: To inject content scripts for data extraction.
-- `downloads`: To trigger the ZIP file download.
-- `storage`: To save user settings.
-- `host_permissions`: To run on the `aistudio.google.com` domain.
+The old converter's `SKIP_TURNS = 1` is this skip setting set to `1`.
 
-## 🐛 Troubleshooting & known issues
+## Privacy
 
--   **Exported markdown file is missing formatting, spacing and/or text for messages**: Ensure the page is fully loaded before starting the export! If the issue persists, check the browser's developer console (F12) for errors and open a GitHub issue.
--   **Export button is disabled or "Not on AI Studio" message**: Make sure you are on a valid AI Studio conversation page and that the page has fully loaded. Try refreshing the page.
--   **Export fails or hangs**: Wait for the AI Studio page to load completely before starting the export. If the issue persists, check the browser's developer console (F12) for errors and open a GitHub issue.
+- Extension pages use `script-src 'self'; object-src 'none'`.
+- The popup only talks to `https://aistudio.google.com/prompts/` tabs.
+- Messages are rejected unless they come from this extension.
+- Settings are sanitized before use.
 
-## 📝 License
+## Development
 
-This project is open source and available under the [MIT License](LICENSE).
+```bash
+npm test
+```
 
----
+`test/sharegpt.test.js` checks the JSONL line against Python's `json.dumps`.
 
-**Made with ❤️ by Sukarth Acharya**
+## Troubleshooting
+
+- **Export failed on a media-only turn:** that turn has an image or file and no text. Image export was removed, and skipping the turn would corrupt the pair order.
+- **Missing text or spacing:** wait until the page is fully loaded, then raise **Element load delay**.
+- **Nothing left after skip:** the skip number is higher than the number of pairs in the chat. Lower it.
+- **System prompt missing:** turn **Save system instructions** on. If the chat has no system instructions, the file correctly starts at the first message.
+- **Button says not on AI Studio:** open a prompt URL and refresh the page so the content script loads.
+
+## License
+
+MIT. Original extension by Sukarth Acharya.

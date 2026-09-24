@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Studio Exporter Settings</title>
+    <title>AI Studio ShareGPT Settings</title>
     <style>
         :root {
             --bg-color: #1a1b1e;
@@ -212,6 +212,13 @@
         .status-msg.show {
             opacity: 1;
         }
+
+        .hint {
+            margin: -4px 0 8px;
+            font-size: 12px;
+            color: var(--accent-color);
+            line-height: 1.5;
+        }
     </style>
 </head>
 
@@ -219,17 +226,20 @@
     <div class="container">
         <div class="header">
             <h1>Settings</h1>
-            <p class="subtitle">Configure how AI Studio Exporter behaves</p>
+            <p class="subtitle">ShareGPT JSONL export. Text only — images are not saved.</p>
         </div>
 
         <div class="card">
-            <div class="section-title">Content Extraction</div>
+            <div class="section-title">ShareGPT export</div>
 
             <div class="setting-group">
                 <div class="setting-item">
-                    <span class="setting-label">Scrape Images</span>
+                    <div>
+                        <span class="setting-label">Save system instructions</span>
+                        <div class="subtitle" style="font-size: 12px; margin-top: 4px;">Off never writes a system turn. On writes one only if this chat actually has system instructions.</div>
+                    </div>
                     <label class="switch">
-                        <input type="checkbox" id="scrapeImages">
+                        <input type="checkbox" id="includeSystem">
                         <span class="slider"></span>
                     </label>
                 </div>
@@ -237,41 +247,21 @@
 
             <div class="setting-group">
                 <div class="setting-item">
-                    <span class="setting-label">Scrape Attachments</span>
-                    <label class="switch">
-                        <input type="checkbox" id="scrapeAttachments">
-                        <span class="slider"></span>
-                    </label>
+                    <div>
+                        <span class="setting-label">Skip turns</span>
+                        <div class="subtitle" style="font-size: 12px; margin-top: 4px;">Any whole number: 0, 1, 2, 3, and so on. Each number drops one user + assistant pair.</div>
+                    </div>
+                    <input type="number" id="skipTurns" class="number-input" min="0" step="1" inputmode="numeric">
                 </div>
-
-                <div id="attachmentOptions">
-                    <div class="setting-item sub-setting">
-                        <span class="setting-label">Include Preview Images</span>
-                        <label class="switch">
-                            <input type="checkbox" id="scrapeAttachmentPreview">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    <div class="setting-item sub-setting">
-                        <span class="setting-label">Include File Name</span>
-                        <label class="switch">
-                            <input type="checkbox" id="scrapeAttachmentTitle">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    <div class="setting-item sub-setting">
-                        <span class="setting-label">Include File Size/Info</span>
-                        <label class="switch">
-                            <input type="checkbox" id="scrapeAttachmentSize">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                </div>
+                <div id="skipTurnsHint" class="hint"></div>
             </div>
 
             <div class="setting-group">
                 <div class="setting-item">
-                    <span class="setting-label">Scrape Reasoning Content</span>
+                    <div>
+                        <span class="setting-label">Include reasoning</span>
+                        <div class="subtitle" style="font-size: 12px; margin-top: 4px;">Keeps model thinking. [MIND] tags are saved as &lt;think&gt; tags.</div>
+                    </div>
                     <label class="switch">
                         <input type="checkbox" id="scrapeReasoning">
                         <span class="slider"></span>

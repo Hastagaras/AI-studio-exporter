@@ -1,87 +1,103 @@
-// DOM Elements
 const elements = {
-    scrapeImages: document.getElementById('scrapeImages'),
-    scrapeAttachments: document.getElementById('scrapeAttachments'),
-    scrapeAttachmentPreview: document.getElementById('scrapeAttachmentPreview'),
-    scrapeAttachmentTitle: document.getElementById('scrapeAttachmentTitle'),
-    scrapeAttachmentSize: document.getElementById('scrapeAttachmentSize'),
-    scrapeReasoning: document.getElementById('scrapeReasoning'),
-    loadDelay: document.getElementById('loadDelay'),
-    attachmentOptions: document.getElementById('attachmentOptions'),
-    saveBtn: document.getElementById('saveBtn'),
-    resetBtn: document.getElementById('resetBtn'),
-    statusMsg: document.getElementById('statusMsg')
+  includeSystem: document.getElementById('includeSystem'),
+  skipTurns: document.getElementById('skipTurns'),
+  skipTurnsHint: document.getElementById('skipTurnsHint'),
+  scrapeReasoning: document.getElementById('scrapeReasoning'),
+  loadDelay: document.getElementById('loadDelay'),
+  saveBtn: document.getElementById('saveBtn'),
+  resetBtn: document.getElementById('resetBtn'),
+  statusMsg: document.getElementById('statusMsg')
 };
 
-// Load settings when page loads
 document.addEventListener('DOMContentLoaded', loadSettings);
-
-// Save settings when save button is clicked
 elements.saveBtn.addEventListener('click', saveSettings);
-
-// Reset settings when reset button is clicked
 elements.resetBtn.addEventListener('click', resetSettings);
+elements.skipTurns.addEventListener('input', updateSkipHint);
 
-// Toggle attachment sub-options visibility
-elements.scrapeAttachments.addEventListener('change', toggleAttachmentOptions);
+function updateSkipHint() {
+  const value = Number(elements.skipTurns.value);
+  const count = elements.skipTurns.value.trim() !== '' && Number.isInteger(value) && value >= 0
+    ? value
+    : 0;
+
+  elements.skipTurnsHint.textContent = describeSkipTurns(count);
+}
 
 function loadSettings() {
-    chrome.storage.sync.get(AI_STUDIO_DEFAULT_SETTINGS, (settings) => {
-        const safeSettings = sanitizeSettings(settings);
+  chrome.storage.sync.get(AI_STUDIO_DEFAULT_SETTINGS, (settings) => {
+    const safeSettings = sanitizeSettings(settings);
 
-        elements.scrapeImages.checked = safeSettings.scrapeImages;
-        elements.scrapeAttachments.checked = safeSettings.scrapeAttachments;
-        elements.scrapeAttachmentPreview.checked = safeSettings.scrapeAttachmentPreview;
-        elements.scrapeAttachmentTitle.checked = safeSettings.scrapeAttachmentTitle;
-        elements.scrapeAttachmentSize.checked = safeSettings.scrapeAttachmentSize;
-        elements.scrapeReasoning.checked = safeSettings.scrapeReasoning;
-        elements.loadDelay.value = safeSettings.loadDelay;
+    elements.includeSystem.checked = safeSettings.includeSystem;
+    elements.skipTurns.value = safeSettings.skipTurns;
+    elements.scrapeReasoning.checked = safeSettings.scrapeReasoning;
+    elements.loadDelay.value = safeSettings.loadDelay;
+    updateSkipHint();
+  });
+}
 
-        toggleAttachmentOptions();
+function readSkipTurns() {
+  if (elements.skipTurns.value.trim() === '') {
+    return null;
+  }
+
+  const value = Number(elements.skipTurns.value);
+  if (!Number.isInteger(value) || value < 0) {
+    return null;
+  }
+
+  return value;
+}
+
+function persistSettings(settings, message) {
+  chrome.storage.sync.set(settings, () => {
+    chrome.storage.sync.remove(OBSOLETE_SETTING_KEYS, () => {
+      if (chrome.runtime.lastError) {
+        showStatus(chrome.runtime.lastError.message);
+        return;
+      }
+
+      showStatus(message);
     });
+  });
 }
 
 function saveSettings() {
-    const settings = sanitizeSettings({
-        scrapeImages: elements.scrapeImages.checked,
-        scrapeAttachments: elements.scrapeAttachments.checked,
-        scrapeAttachmentPreview: elements.scrapeAttachmentPreview.checked,
-        scrapeAttachmentTitle: elements.scrapeAttachmentTitle.checked,
-        scrapeAttachmentSize: elements.scrapeAttachmentSize.checked,
-        scrapeReasoning: elements.scrapeReasoning.checked,
-        loadDelay: elements.loadDelay.value
-    });
+  const skipTurns = readSkipTurns();
+  if (skipTurns === null) {
+    showStatus('Skip turns must be a whole number: 0, 1, 2, 3, ...');
+    return;
+  }
 
-    chrome.storage.sync.set(settings, () => {
-        showStatus('Settings saved successfully');
-    });
+  const settings = sanitizeSettings({
+    includeSystem: elements.includeSystem.checked,
+    skipTurns,
+    scrapeReasoning: elements.scrapeReasoning.checked,
+    loadDelay: elements.loadDelay.value
+  });
+
+  elements.skipTurns.value = settings.skipTurns;
+  elements.loadDelay.value = settings.loadDelay;
+  updateSkipHint();
+  persistSettings(settings, 'Settings saved');
 }
 
 function resetSettings() {
-    if (confirm('Are you sure you want to reset all settings to default?')) {
-        chrome.storage.sync.set(AI_STUDIO_DEFAULT_SETTINGS, () => {
-            loadSettings();
-            showStatus('Settings reset to defaults');
-        });
-    }
-}
+  if (!confirm('Reset all settings to default?')) {
+    return;
+  }
 
-function toggleAttachmentOptions() {
-    const isEnabled = elements.scrapeAttachments.checked;
-    const inputs = elements.attachmentOptions.querySelectorAll('input');
-
-    elements.attachmentOptions.style.opacity = isEnabled ? '1' : '0.5';
-    elements.attachmentOptions.style.pointerEvents = isEnabled ? 'auto' : 'none';
-
-    inputs.forEach(input => {
-        input.disabled = !isEnabled;
+  chrome.storage.sync.set(AI_STUDIO_DEFAULT_SETTINGS, () => {
+    chrome.storage.sync.remove(OBSOLETE_SETTING_KEYS, () => {
+      loadSettings();
+      showStatus('Settings reset to defaults');
     });
+  });
 }
 
 function showStatus(message) {
-    elements.statusMsg.textContent = message;
-    elements.statusMsg.classList.add('show');
-    setTimeout(() => {
-        elements.statusMsg.classList.remove('show');
-    }, 3000);
+  elements.statusMsg.textContent = message;
+  elements.statusMsg.classList.add('show');
+  setTimeout(() => {
+    elements.statusMsg.classList.remove('show');
+  }, 3000);
 }

@@ -1,25 +1,23 @@
 {
   "name": "ai-studio-exporter",
-  "version": "1.0.1",
-  "description": "Chrome extension to export conversations from Google AI Studio with media attachments",
+  "version": "2.0.0",
+  "description": "Chrome extension that exports a Google AI Studio conversation directly to ShareGPT JSONL",
   "main": "background.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test test/sharegpt.test.js"
   },
   "keywords": [
     "chrome-extension",
     "google-ai-studio",
     "export",
     "conversation",
-    "chat",
-    "markdown",
-    "backup"
+    "sharegpt",
+    "jsonl"
   ],
   "author": "Sukarth Acharya",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sukarth/ai-studio-exporter"
+    "url": "https://github.com/Hastagaras/AI-studio-exporter"
   }
-
 }
